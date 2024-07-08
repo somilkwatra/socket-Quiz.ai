@@ -4,6 +4,7 @@ const socketIo = require("socket.io");
 const cors = require("cors");
 const GameManager = require("./GameManager");
 const gameManager = new GameManager();
+const mongoose = require("mongoose");
 
 const app = express();
 

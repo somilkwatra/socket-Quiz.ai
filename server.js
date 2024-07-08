@@ -4,7 +4,6 @@ const socketIo = require("socket.io");
 const cors = require("cors");
 const GameManager = require("./GameManager");
 const gameManager = new GameManager();
-const mongoose = require("mongoose");
 
 const app = express();
 
@@ -32,21 +31,33 @@ function generateUniqueSixDigitPin() {
 }
 
 function askNewQuestion(room) {
-  console.log("room", rooms[room]);
-  console.log("PLayers length= ", rooms[room].players.length);
+  // Check if the room exists
+  if (!rooms[room]) {
+    console.error(`Room ${room} does not exist`);
+    return;
+  }
+
+  // Check if there are any players in the room
   if (rooms[room].players.length === 0) {
     clearTimeout(rooms[room].questionTimeout);
     delete rooms[room];
     activeRoomCodes.delete(room);
     return;
   }
+
   const questions = rooms[room].questions;
   const currentQuestionIndex = rooms[room].currentQuestionIndex || 0;
-  console.log("currentQuestionIndex=", currentQuestionIndex);
+
+  // If we've asked all questions, end the game and show leaderboard
+  if (currentQuestionIndex >= questions.length) {
+    showLeaderboard(room);
+    return;
+  }
+
   const ques = questions[currentQuestionIndex];
 
-  rooms[room].currentQuestionIndex =
-    (currentQuestionIndex + 1) % questions.length;
+  rooms[room].currentQuestionIndex = currentQuestionIndex + 1;
+  console.log(rooms[room].currentQuestionIndex);
 
   return {
     question: ques.question,
@@ -54,30 +65,28 @@ function askNewQuestion(room) {
     answers: ques.answerList?.map((answer) => answer.body),
     timer: 10,
   };
+}
 
-  // rooms[room].currentQuestion = question
+function showLeaderboard(room) {
+  const sortedPlayers = rooms[room].players
+    .filter((player) => player.name !== "Host") // Exclude host from ranking
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3); // Get top 3 players
 
-  // const correctAnswerIndex = question.answers.findIndex(
-  //   (answer) => answer.correct
-  // )
-  // rooms[room].correctAnswer = correctAnswerIndex
-  // io.to(room).emit('newQuestion', {
-  //   question: question.question,
-  //   answers: question.answers.map((answer) => answer.text),
-  //   timer: 10,
-  // })
-  // rooms[room].questionTimeout = setTimeout(() => {
-  //   io.to(room).emit('answerResult', {
-  //     playerName: 'No one',
-  //     isCorrect: false,
-  //     correctAnswer: rooms[room].correctAnswer,
-  //     scores: rooms[room].players.map((player) => ({
-  //       name: player.name,
-  //       score: player.score || 0,
-  //     })),
-  //   })
-  //   askNewQuestion(room)
-  // }, 10000)
+  const topPlayers = sortedPlayers.map((player, index) => ({
+    name: player.name,
+    score: player.score,
+    position: index + 1,
+  }));
+
+  io.to(room).emit("gameOver", {
+    winner: topPlayers[0]?.name || "No one",
+    topPlayers,
+  });
+
+  // Clean up the room
+  delete rooms[room];
+  activeRoomCodes.delete(room);
 }
 
 io.on("connection", (socket) => {
@@ -133,28 +142,6 @@ io.on("connection", (socket) => {
     });
   });
 
-  // socket.on('startGame', ({ room }) => {
-  //   const StartAskingQuestion = () => {
-  //     const question = askNewQuestion(room)
-  //     io.to(room).emit('newQuestion', question)
-  //     setTimeout(() => {
-  //       io.to(room).emit('answerResult', {
-  //         playerName: 'No one',
-  //         isCorrect: false,
-  //         correctAnswer: rooms[room].correctAnswer,
-  //         scores: rooms[room].players.map((player) => ({
-  //           name: player.name,
-  //           score: player.score || 0,
-  //         })),
-  //       })
-  //       StartAskingQuestion()
-  //     }, question.timer * 1000)
-  //   }
-
-  //   socket.broadcast.to(room).emit('gameStarted')
-  //   StartAskingQuestion()
-  // })
-
   socket.on("submitAnswer", (room, questionIndex, answerIndex, callback) => {
     if (!rooms[room]) {
       console.error(`Room ${room} does not exist.`);
@@ -185,7 +172,7 @@ io.on("connection", (socket) => {
     const submittedAnswer = question.answerList[answerIndex];
 
     const isCorrect = submittedAnswer.isCorrect === correctAnswer.isCorrect;
-    console.log("isCorrect=", isCorrect);
+    // console.log('isCorrect=', isCorrect)
 
     if (isCorrect) {
       currentPlayer.score += 1;
@@ -209,33 +196,16 @@ io.on("connection", (socket) => {
     );
 
     if (winner) {
-      // Sort players by score in descending order
-      const sortedPlayers = rooms[room].players
-        .filter((player) => player.name !== "Host") // Exclude host from ranking
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3); // Get top 3 players
-
-      const topPlayers = sortedPlayers.map((player, index) => ({
-        name: player.name,
-        score: player.score,
-        position: index + 1,
-      }));
-
-      io.to(room).emit("gameOver", {
-        winner: winner.name,
-        topPlayers,
-      });
-
-      // Clean up the room
-      delete rooms[room];
-      activeRoomCodes.delete(room);
+      showLeaderboard(room);
     }
   });
 
   socket.on("startGame", ({ room }) => {
     const StartAskingQuestion = () => {
       const question = askNewQuestion(room);
-      //   const question = askNewQuestion(room);
+      // If no question is returned, it means the game has ended
+      if (!question) return;
+
       io.to(room).emit("newQuestion", question);
 
       socket.broadcast.to(room).emit("newQuestion", { question });
@@ -251,7 +221,8 @@ io.on("connection", (socket) => {
           // })),
         });
         StartAskingQuestion();
-      }, question.timer * 1000);
+        // }, question.timer * 1000)
+      }, 10000);
     };
 
     socket.broadcast.to(room).emit("gameStarted");

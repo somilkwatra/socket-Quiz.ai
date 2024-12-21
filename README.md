@@ -1,1 +1,1 @@
-This is a Project on Quz.ai wherein we've created an Interface using Backend as well as Frontend.
+This is a Project on Quiz.ai wherein we've created an Interface using Backend as well as Frontend. It consists of creating Quiz like interface using Prompt engineering and saves Time in case of Creating Quiz.
